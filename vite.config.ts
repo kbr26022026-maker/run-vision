@@ -5,7 +5,8 @@ import vueDevTools from 'vite-plugin-vue-devtools';
 import vuetify from 'vite-plugin-vuetify';
 
 export default defineConfig({
-  base: '/run-vision/',
+  // GitHub Pages serves from /run-vision/, Vercel from the root
+  base: process.env.VERCEL ? '/' : '/run-vision/',
   plugins: [vue(), vueDevTools(), vuetify()],
   resolve: {
     alias: {

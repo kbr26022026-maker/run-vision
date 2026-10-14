@@ -1,15 +1,15 @@
 {
-  "id": "/run-vision/",
+  "id": "./",
   "name": "Runvision",
   "short_name": "Runvision",
-  "start_url": "/run-vision/",
-  "scope": "/run-vision/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#172554",
   "theme_color": "#172554",
   "icons": [
     {
-      "src": "/run-vision/icons/app-icon.svg",
+      "src": "./icons/app-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
