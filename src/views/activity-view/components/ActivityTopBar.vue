@@ -161,7 +161,8 @@ const emit = defineEmits<{
   }
 }
 
-@media (max-width: 380px) {
+/* The wordmark does not fit next to both buttons on phones up to ~460px wide. */
+@media (max-width: 460px) {
   .topbar__brand :deep(.brand__name) {
     display: none;
   }

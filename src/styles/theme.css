@@ -95,6 +95,11 @@ body {
   outline-offset: 2px;
 }
 
+/* Dialogs receive focus programmatically when they open; that is not keyboard focus. */
+.v-overlay__content:focus-visible {
+  outline: none;
+}
+
 /* Shared building blocks */
 .rv-glass {
   background: var(--rv-glass);
