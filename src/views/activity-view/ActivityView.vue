@@ -1,237 +1,421 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import Activity3DMap from '@/views/activity-view/components/Activity3DMap.vue';
-import ActivityMapControls from '@/views/activity-view/components/ActivityMapControls.vue';
-import ActivityPlaybackControls from '@/views/activity-view/components/ActivityPlaybackControls.vue';
-import { getPlaybackDuration } from '@/entities/activity/model/activity-playback';
-import { useActivityStore } from '@/stores/activity.store';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
+import { useDisplay } from 'vuetify';
 
-type ViewMode = '2d' | '3d';
-type MapStyle = 'map' | 'satellite';
+import ActivityMap from './components/ActivityMap.vue';
+import ActivityTopBar from './components/ActivityTopBar.vue';
+import ActivitySummary from './components/ActivitySummary.vue';
+import ImportHero from './components/ImportHero.vue';
+import MapToolbar from './components/MapToolbar.vue';
+import PlaybackBar, { type PlaybackLength } from './components/PlaybackBar.vue';
+import SplitsList from './components/SplitsList.vue';
+import BottomSheet from '@/shared/ui/BottomSheet.vue';
+import BrandMark from '@/shared/ui/BrandMark.vue';
+
+import { useActivityStore } from '@/stores/activity.store';
+import { useGpxImport } from '@/hooks/useGpxImport';
+import { oneOf, usePersistentRef } from '@/shared/lib/storage/persistent-ref';
+import type { MapStyleId, ViewMode } from '@/shared/lib/map/map-styles';
+import type { RouteColorMode } from '@/shared/lib/color/color-scales';
+import type { MapPadding } from '@/hooks/useActivityMap';
 
 const activityStore = useActivityStore();
+const router = useRouter();
+const gpx = useGpxImport();
+const { width } = useDisplay();
 
-const currentTimeSeconds = ref(0);
-const isPlaying = ref(false);
-const playbackSpeed = ref(2);
-
-const viewMode = ref<ViewMode>('3d');
-const mapStyle = ref<MapStyle>('map');
-const followCamera = ref(false);
-
-const activity3DMap = ref<InstanceType<typeof Activity3DMap> | null>(null);
-
-let animationFrameId = 0;
-let lastFrameTime = 0;
+const isDesktop = computed(() => width.value >= 900);
 
 const activity = computed(() => activityStore.activity);
+const analysis = computed(() => activityStore.analysis);
 
-const durationSeconds = computed(() => {
-  if (!activity.value) {
-    return 0;
+const mapStyle = usePersistentRef<MapStyleId>(
+  'rv:map-style',
+  'dark',
+  oneOf(['dark', 'light', 'satellite'] as const),
+);
+const viewMode = usePersistentRef<ViewMode>('rv:view-mode', '3d', oneOf(['2d', '3d'] as const));
+const colorMode = usePersistentRef<RouteColorMode>(
+  'rv:route-color',
+  'pace',
+  oneOf(['solid', 'pace', 'heartRate', 'elevation'] as const),
+);
+const playbackLength = usePersistentRef<PlaybackLength>(
+  'rv:playback-length',
+  30,
+  oneOf([15, 30, 60, 120, 0] as const),
+);
+const follow = ref(false);
+const isSheetOpen = ref(false);
+const sheetPeekHeight = ref(170);
+
+const mapRef = ref<InstanceType<typeof ActivityMap> | null>(null);
+
+const availableColorModes = computed<RouteColorMode[]>(() => {
+  const modes: RouteColorMode[] = ['solid', 'pace'];
+  const series = analysis.value?.series;
+
+  if (series?.heartRate.some((value) => Number.isFinite(value))) {
+    modes.push('heartRate');
   }
-  return getPlaybackDuration(activity.value.track);
+
+  modes.push('elevation');
+  return modes;
 });
 
-function setViewMode(mode: ViewMode) {
-  viewMode.value = mode;
-  activity3DMap.value?.setViewMode(mode);
-}
+watch(availableColorModes, (modes) => {
+  if (!modes.includes(colorMode.value)) {
+    colorMode.value = 'pace';
+  }
+});
 
-function setMapStyle(style: MapStyle) {
-  mapStyle.value = style;
-  activity3DMap.value?.setMapStyle(style);
-}
-
-function setFollowCamera(enabled: boolean) {
-  followCamera.value = enabled;
-  activity3DMap.value?.setFollowCamera(enabled);
-}
-
-function updateMap() {
-  activity3DMap.value?.setPlaybackTime(currentTimeSeconds.value);
-}
-
-async function syncActivity() {
-  currentTimeSeconds.value = 0;
-
-  await nextTick();
-
-  activity3DMap.value?.setPlaybackTime(0);
-  activity3DMap.value?.setViewMode(viewMode.value);
-  activity3DMap.value?.setMapStyle(mapStyle.value);
-  activity3DMap.value?.setFollowCamera(followCamera.value);
-}
-
-watch(
-  () => activity.value?.id,
-  async (id, previousId) => {
-    if (!id || id === previousId) {
-      return;
-    }
-
-    await syncActivity();
-  },
+const mapPadding = computed<MapPadding>(() =>
+  isDesktop.value
+    ? { top: 100, right: 90, bottom: 190, left: 440 }
+    : { top: 90, right: 72, bottom: sheetPeekHeight.value + 30, left: 28 },
 );
-function changePlaybackSpeed(speed: number) {
-  playbackSpeed.value = speed;
+
+/* ---------- Playback ---------- */
+
+const currentTime = ref(0);
+const isPlaying = ref(false);
+let frame = 0;
+let lastFrame = 0;
+let resumeAfterScrub = false;
+
+const duration = computed(() => analysis.value?.series.elapsed.at(-1) ?? 0);
+
+const speed = computed(() => {
+  if (!playbackLength.value || duration.value <= 0) {
+    return 1;
+  }
+
+  return duration.value / playbackLength.value;
+});
+
+function syncMap() {
+  mapRef.value?.setPlaybackTime(
+    currentTime.value,
+    isPlaying.value || (currentTime.value > 0 && currentTime.value < duration.value),
+  );
+}
+
+function tick(timestamp: number) {
+  if (!isPlaying.value) {
+    return;
+  }
+
+  const delta = Math.min((timestamp - lastFrame) / 1000, 0.1);
+  lastFrame = timestamp;
+  currentTime.value = Math.min(duration.value, currentTime.value + delta * speed.value);
+
+  if (currentTime.value >= duration.value) {
+    isPlaying.value = false;
+  }
+
+  syncMap();
+
+  if (isPlaying.value) {
+    frame = requestAnimationFrame(tick);
+  }
 }
 
 function play() {
   if (!activity.value || isPlaying.value) {
     return;
   }
-  if (currentTimeSeconds.value >= durationSeconds.value) {
-    currentTimeSeconds.value = 0;
-    updateMap();
+
+  if (currentTime.value >= duration.value) {
+    currentTime.value = 0;
   }
+
   isPlaying.value = true;
-  lastFrameTime = performance.now();
-  animationFrameId = requestAnimationFrame(animate);
+  lastFrame = performance.now();
+  frame = requestAnimationFrame(tick);
 }
 
 function pause() {
   isPlaying.value = false;
-  cancelAnimationFrame(animationFrameId);
-  lastFrameTime = 0;
-}
-
-function animate(timestamp: number) {
-  if (!isPlaying.value) {
-    return;
-  }
-  const deltaSeconds = (timestamp - lastFrameTime) / 1000;
-  lastFrameTime = timestamp;
-  currentTimeSeconds.value += deltaSeconds * playbackSpeed.value;
-  if (currentTimeSeconds.value >= durationSeconds.value) {
-    currentTimeSeconds.value = durationSeconds.value;
-    isPlaying.value = false;
-    updateMap();
-    return;
-  }
-  updateMap();
-  animationFrameId = requestAnimationFrame(animate);
+  cancelAnimationFrame(frame);
+  syncMap();
 }
 
 function seek(seconds: number) {
-  currentTimeSeconds.value = Math.min(Math.max(seconds, 0), durationSeconds.value);
-  updateMap();
+  currentTime.value = Math.min(Math.max(seconds, 0), duration.value);
+  syncMap();
 }
 
+function handleScrubStart() {
+  resumeAfterScrub = isPlaying.value;
+  pause();
+}
+
+function handleScrubEnd() {
+  if (resumeAfterScrub) {
+    play();
+  }
+}
+
+watch(
+  () => activity.value?.id,
+  () => {
+    pause();
+    currentTime.value = 0;
+    follow.value = false;
+    isSheetOpen.value = false;
+  },
+);
+
+/* ---------- Actions ---------- */
+
+function fitRoute() {
+  follow.value = false;
+  mapRef.value?.fitRoute(true);
+}
+
+function createPost() {
+  pause();
+  void router.push('/studio');
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+
+  if (!activity.value || target?.closest('input, textarea, [contenteditable]')) {
+    return;
+  }
+
+  if (event.code === 'Space') {
+    event.preventDefault();
+    if (isPlaying.value) {
+      pause();
+    } else {
+      play();
+    }
+  } else if (event.key === 'ArrowRight') {
+    seek(currentTime.value + duration.value * 0.02);
+  } else if (event.key === 'ArrowLeft') {
+    seek(currentTime.value - duration.value * 0.02);
+  } else if (event.key.toLowerCase() === 'f') {
+    fitRoute();
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', handleKeydown));
+
 onBeforeUnmount(() => {
-  cancelAnimationFrame(animationFrameId);
+  cancelAnimationFrame(frame);
+  window.removeEventListener('keydown', handleKeydown);
 });
 </script>
 
 <template>
-  <div class="page">
-    <template v-if="activity">
-      <div class="activity-layout">
-        <div class="activity-header">
-          <ActivityMapControls
-            :view-mode="viewMode"
-            :map-style="mapStyle"
-            :follow-camera="followCamera"
-            @update:view-mode="setViewMode"
-            @update:map-style="setMapStyle"
-            @update:follow-camera="setFollowCamera"
-          />
-        </div>
+  <div v-if="activity && analysis" class="screen">
+    <ActivityMap
+      :key="activity.id"
+      ref="mapRef"
+      :activity="activity"
+      :series="analysis.series"
+      :map-style="mapStyle"
+      :view-mode="viewMode"
+      :color-mode="colorMode"
+      :follow="follow"
+      :padding="mapPadding"
+    />
 
-        <div class="activity-map-container">
-          <Activity3DMap :key="activity.id" ref="activity3DMap" :activity="activity" />
-        </div>
+    <div class="screen__scrim" aria-hidden="true" />
 
-        <ActivityPlaybackControls
+    <ActivityTopBar
+      :recents="activityStore.recents"
+      :active-id="activity.id"
+      :is-importing="activityStore.isImporting"
+      @import="gpx.openFilePicker"
+      @open="gpx.openRecent"
+      @remove="activityStore.deleteRecent"
+      @create="createPost"
+    />
+
+    <MapToolbar
+      class="screen__toolbar"
+      :map-style="mapStyle"
+      :view-mode="viewMode"
+      :color-mode="colorMode"
+      :follow="follow"
+      :available-color-modes="availableColorModes"
+      @update:map-style="mapStyle = $event"
+      @update:view-mode="viewMode = $event"
+      @update:color-mode="colorMode = $event"
+      @update:follow="follow = $event"
+      @fit="fitRoute"
+    />
+
+    <template v-if="isDesktop">
+      <aside class="panel rv-glass">
+        <ActivitySummary
           :activity="activity"
-          :current-time-seconds="currentTimeSeconds"
-          :duration-seconds="durationSeconds"
+          :summary="analysis.summary"
+          @rename="activityStore.rename"
+        />
+        <SplitsList :splits="analysis.splits" />
+      </aside>
+
+      <div class="playback-dock rv-glass">
+        <PlaybackBar
+          :series="analysis.series"
+          :current-time-seconds="currentTime"
+          :duration-seconds="duration"
           :is-playing="isPlaying"
+          :playback-length="playbackLength"
           @play="play"
           @pause="pause"
           @seek="seek"
-          @speed="changePlaybackSpeed"
+          @scrub-start="handleScrubStart"
+          @scrub-end="handleScrubEnd"
+          @update:playback-length="playbackLength = $event"
         />
       </div>
     </template>
 
-    <template v-else>
-      <div class="empty-state">
-        <div class="empty-content">
-          <v-icon icon="mdi-run" size="64" class="mb-4" />
-          <h2 class="text-h5 mb-2">Нет тренировки</h2>
-          <p class="text-body-2 text-medium-emphasis">
-            Нажмите «Импортировать GPX» в правом верхнем углу, чтобы открыть тренировку.
-          </p>
-        </div>
+    <BottomSheet v-else v-model:open="isSheetOpen" @peek-height="sheetPeekHeight = $event">
+      <template #peek>
+        <PlaybackBar
+          compact
+          :series="analysis.series"
+          :current-time-seconds="currentTime"
+          :duration-seconds="duration"
+          :is-playing="isPlaying"
+          :playback-length="playbackLength"
+          @play="play"
+          @pause="pause"
+          @seek="seek"
+          @scrub-start="handleScrubStart"
+          @scrub-end="handleScrubEnd"
+          @update:playback-length="playbackLength = $event"
+        />
+      </template>
+
+      <div class="sheet-content">
+        <ActivitySummary
+          :activity="activity"
+          :summary="analysis.summary"
+          @rename="activityStore.rename"
+        />
+        <button type="button" class="rv-btn rv-btn--primary rv-btn--block" @click="createPost">
+          <v-icon icon="mdi-creation" size="20" />
+          Создать пост или видео
+        </button>
+        <SplitsList :splits="analysis.splits" />
       </div>
-    </template>
+    </BottomSheet>
   </div>
+
+  <div v-else-if="activityStore.isRestoring" class="splash">
+    <BrandMark compact class="splash__mark" />
+  </div>
+
+  <ImportHero
+    v-else
+    :recents="activityStore.recents"
+    :is-importing="activityStore.isImporting"
+    @pick="gpx.openFilePicker"
+    @sample="gpx.importSample"
+    @open="gpx.openRecent"
+  />
 </template>
 
 <style scoped>
-.page {
-  width: 100%;
-  max-width: 100%;
-  height: 100%;
-  min-height: 0;
-  padding: 12px 16px;
+.screen {
+  position: fixed;
+  inset: 0;
   overflow: hidden;
-  box-sizing: border-box;
+  background: var(--rv-bg);
 }
 
-.activity-layout {
+.screen__scrim {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 120px;
+  background: linear-gradient(to bottom, rgb(10 10 11 / 55%), rgb(10 10 11 / 0%));
+  pointer-events: none;
+}
+
+.screen__toolbar {
+  position: absolute;
+  z-index: 10;
+  top: calc(76px + var(--rv-safe-top));
+  right: 12px;
+}
+
+.panel {
+  position: absolute;
+  z-index: 10;
+  top: calc(76px + var(--rv-safe-top));
+  bottom: 16px;
+  left: 12px;
+  display: flex;
+  width: 380px;
+  flex-direction: column;
+  gap: 28px;
+  padding: 22px 20px;
+  overflow-y: auto;
+  border-radius: var(--rv-radius-xl);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 15%) transparent;
+}
+
+.playback-dock {
+  position: absolute;
+  z-index: 10;
+  right: 76px;
+  bottom: 16px;
+  left: 416px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 14px 18px 10px;
+  border-radius: var(--rv-radius-xl);
+}
+
+.sheet-content {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 80px);
-  min-height: 0;
-  gap: 12px;
+  gap: 22px;
 }
 
-.activity-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 0 0 auto;
-  min-width: 0;
+.splash {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
 }
 
-.activity-map-container {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: hidden;
+.splash__mark {
+  animation: splash-pulse 1.2s ease-in-out infinite alternate;
 }
 
-.empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 70vh;
+.splash__mark :deep(.brand__mark) {
+  width: 56px;
+  height: 56px;
 }
 
-.empty-content {
-  width: 100%;
-  max-width: 420px;
-  text-align: center;
-}
-
-@media (max-width: 600px) {
-  .page {
-    padding: 8px 8px;
+@keyframes splash-pulse {
+  from {
+    opacity: 0.4;
+    transform: scale(0.94);
   }
 
-  .activity-layout {
-    height: calc(100dvh - 64px);
-    gap: 8px;
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
+}
 
-  .empty-state {
-    min-height: calc(100dvh - 120px);
-    padding: 16px;
-  }
-
-  .empty-content {
-    max-width: 320px;
+@media (max-width: 899px) {
+  .screen__toolbar {
+    top: calc(68px + var(--rv-safe-top));
+    right: 10px;
   }
 }
 </style>

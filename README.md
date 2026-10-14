@@ -1,54 +1,43 @@
-# run-vision
+# RunVision
 
-This template should help get you started developing with Vue 3 in Vite.
+Превращает GPX-тренировку в карточку или видео для Instagram Stories, постов и Reels.
+Всё считается и рисуется в браузере — файлы никуда не отправляются.
 
-## Recommended IDE Setup
+## Возможности
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+- **Импорт GPX** из Strava, Garmin Connect, Apple Watch (через HealthFit/RunGap): кнопка,
+  drag&drop на любой экран, «Открыть с помощью» и «Поделиться» в установленном PWA.
+  Последние 12 тренировок хранятся локально (IndexedDB) и открываются после перезагрузки.
+- **Карта**: тёмная/светлая (OpenFreeMap) и спутник (Esri), 3D-рельеф, трек с градиентом
+  по темпу, пульсу или высоте, проигрывание за 15 с–2 мин с камерой «за бегуном».
+- **Анализ**: время в движении без пауз, сплиты по километрам, лучший километр, набор высоты.
+- **Студия**: 7 шаблонов (Минимал, Большая цифра, Неон, Карта, Сплиты, Чек, Стикер),
+  форматы Stories 9:16 / Пост 4:5 / Квадрат 1:1, 12 палитр и свои цвета, своё фото на фоне
+  с перемещением и зумом, безопасные зоны Stories.
+- **Экспорт**: PNG ровно 1080 px через системное меню «Поделиться», скачивание, копирование
+  стикера в буфер; MP4 1080×1920 с анимацией маршрута (WebCodecs, запасной путь — MediaRecorder).
 
-## Recommended Browser Setup
+## Устройство
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+| Папка | Что внутри |
+| --- | --- |
+| `src/entities/activity` | парсер GPX, расчёты по треку (`activity-analysis.ts`), проекция маршрута, хранилище |
+| `src/entities/card` | данные карточки, палитры, шаблоны и canvas-рендер (`render/`), экспорт PNG/MP4, снимок карты |
+| `src/views/activity-view` | главный экран: карта, панели, плеер, стартовый экран |
+| `src/views/studio` | студия: превью, выбор шаблона, панели настроек, экспорт видео |
+| `public/sw.js` | service worker: офлайн-оболочка и приём файлов через Web Share Target |
 
-## Type Support for `.vue` Imports in TS
+Один и тот же `renderCard()` рисует превью, миниатюры шаблонов, PNG и каждый кадр видео,
+поэтому то, что видно в студии, совпадает с результатом.
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## Команды
 
 ```sh
 npm install
+npm run dev         # разработка
+npm run build       # проверка типов + сборка в dist/
+npm run test:unit   # юнит-тесты (Vitest)
+npm run lint        # oxlint + eslint
 ```
 
-### Compile and Hot-Reload for Development
-
-```sh
-npm run dev
-```
-
-### Type-Check, Compile and Minify for Production
-
-```sh
-npm run build
-```
-
-### Run Unit Tests with [Vitest](https://vitest.dev/)
-
-```sh
-npm run test:unit
-```
-
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-npm run lint
-```
+Деплой на GitHub Pages — `.github/workflows/deploy.yml`, база `/run-vision/`.

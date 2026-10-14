@@ -5,22 +5,3 @@ import AppLayout from '@/views/layouts/AppLayout.vue';
 <template>
   <AppLayout />
 </template>
-
-<style>
-:root {
-  color-scheme: only dark;
-}
-
-html,
-body,
-#app {
-  min-height: 100%;
-  background-color: var(--app-background);
-  color: var(--app-text);
-}
-
-.v-application {
-  background: var(--app-background);
-  color: var(--app-text);
-}
-</style>

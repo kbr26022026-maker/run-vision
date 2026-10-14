@@ -10,7 +10,6 @@ type CameraControllerOptions = {
   smoothing?: number;
   bearingSmoothing?: number;
   bearingThreshold?: number;
-  zoom?: number;
 };
 
 export function getBearing(from: maplibregl.LngLatLike, to: maplibregl.LngLatLike): number {
@@ -38,7 +37,6 @@ export function createCameraController(map: maplibregl.Map, options: CameraContr
   const smoothing = options.smoothing ?? 8;
   const bearingSmoothing = options.bearingSmoothing ?? 4;
   const bearingThreshold = options.bearingThreshold ?? 30;
-  const zoom = options.zoom ?? 16.8;
   let animationFrame = 0;
   let lastFrameTime = 0;
   let target: CameraTarget | null = null;

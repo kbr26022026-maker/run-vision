@@ -12,4 +12,19 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  build: {
+    // MapLibre alone is ~800 kB minified; it is split out and cached separately.
+    chunkSizeWarningLimit: 1100,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'maplibre', test: /node_modules[\\/]maplibre-gl/ },
+            { name: 'mediabunny', test: /node_modules[\\/]mediabunny/ },
+            { name: 'vue-vendor', test: /node_modules[\\/](vue|@vue|vue-router|pinia|vuetify)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
 });
