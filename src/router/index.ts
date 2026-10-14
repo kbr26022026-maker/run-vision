@@ -12,6 +12,14 @@ const router = createRouter({
       path: '/activity',
       component: () => import('@/views/activity-view/ActivityView.vue'),
     },
+    {
+      path: '/studio',
+      component: () => import('@/views/studio/StudioView.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/activity',
+    },
   ],
 });
 

@@ -1,20 +1,47 @@
-export function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.round(seconds % 60);
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+function splitClock(totalSeconds: number) {
+  const total = Math.max(0, Math.round(totalSeconds));
+  return {
+    hours: Math.floor(total / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  };
 }
 
-export function formatPace(secondsPerKm: number | null): string {
-  if (secondsPerKm === null || !Number.isFinite(secondsPerKm)) {
+/** Clock-style duration: `4:05`, `31:25`, `1:02:13`. */
+export function formatClock(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
     return '—';
   }
-  const minutes = Math.floor(secondsPerKm / 60);
-  const seconds = Math.round(secondsPerKm % 60);
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+  const { hours, minutes, seconds } = splitClock(totalSeconds);
+  const ss = String(seconds).padStart(2, '0');
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${ss}`;
+  }
+
+  return `${minutes}:${ss}`;
+}
+
+export function formatDuration(seconds: number): string {
+  return formatClock(seconds);
+}
+
+/** Pace in `m:ss`. Rounds the whole value first so 6:59.6 becomes 7:00, not 6:60. */
+export function formatPace(secondsPerKm: number | null): string {
+  if (secondsPerKm === null || !Number.isFinite(secondsPerKm) || secondsPerKm <= 0) {
+    return '—';
+  }
+
+  const total = Math.round(secondsPerKm);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function formatHeartRate(value: number | null): string {
-  return value === null ? '—' : `${Math.round(value)}`;
+  return value === null || !Number.isFinite(value) ? '—' : `${Math.round(value)}`;
 }
 
 export function formatGrade(value: number | null): string {
@@ -29,30 +56,46 @@ export function formatPlaybackDistance(meters: number): string {
   return (meters / 1000).toFixed(2);
 }
 
-export function formatActivityDuration(totalSeconds: number): string {
-  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+export function formatDistanceKm(meters: number, digits = 2): string {
+  if (!Number.isFinite(meters) || meters < 0) {
     return '—';
   }
 
-  const total = Math.floor(totalSeconds);
+  return (meters / 1000).toFixed(digits);
+}
 
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
+export function formatActivityDuration(totalSeconds: number): string {
+  return formatClock(totalSeconds);
+}
 
-  const parts: string[] = [];
+const dateFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
 
-  if (hours > 0) {
-    parts.push(`${hours}ч`);
-  }
+const shortDateFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric',
+  month: 'short',
+});
 
-  if (minutes > 0) {
-    parts.push(`${minutes}мин`);
-  }
+const timeFormatter = new Intl.DateTimeFormat('ru-RU', {
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds}с`);
-  }
+export function formatActivityDate(date: Date): string {
+  return dateFormatter.format(date).replace(/\s*г\.$/, '');
+}
 
-  return parts.join(' ');
+export function formatShortDate(date: Date): string {
+  return shortDateFormatter.format(date).replace('.', '');
+}
+
+export function formatTimeOfDay(date: Date): string {
+  return timeFormatter.format(date);
+}
+
+export function formatActivityDateTime(date: Date): string {
+  return `${formatActivityDate(date)}, ${formatTimeOfDay(date)}`;
 }
